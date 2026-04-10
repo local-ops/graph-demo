@@ -1,0 +1,131 @@
+version: "3"
+
+vars:
+  NAMESPACE: lightrag-stack
+  CONTEXT: ""
+  REPO_ROOT:
+    sh: git rev-parse --show-toplevel
+  KUBECTL:
+    sh: |
+      if [ -n "{{.CONTEXT}}" ]; then
+        echo "kubectl --context={{.CONTEXT}}"
+      else
+        echo "kubectl"
+      fi
+
+tasks:
+  default:
+    desc: List Taskfile tasks
+    cmds:
+      - task --list
+
+  secrets:sync:
+    desc: Render Kubernetes Secret `lightrag-env` from deploy/lightrag.env
+    cmds:
+      - 'bash "{{.REPO_ROOT}}/scripts/render-lightrag-secret.sh" "{{.REPO_ROOT}}/deploy/lightrag.env" "{{.REPO_ROOT}}/k8s/generated/lightrag-env-secret.yaml"'
+    requires:
+      vars: [REPO_ROOT]
+
+  k8s:apply:
+    desc: Apply namespace + workloads (expects k8s/generated/lightrag-env-secret.yaml)
+    cmds:
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/namespace.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/ollama.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/generated/lightrag-env-secret.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/lightrag.yaml"'
+      - 'test -f "{{.REPO_ROOT}}/k8s/open-webui-secrets.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/open-webui-secrets.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/open-webui.yaml"'
+    requires:
+      vars: [REPO_ROOT]
+
+  infra:start:
+    desc: Sync secrets (if present) and apply the full stack
+    cmds:
+      - |
+        if [ -f "{{.REPO_ROOT}}/deploy/lightrag.env" ]; then
+          task secrets:sync
+        else
+          echo "deploy/lightrag.env not found; run secrets:sync manually after copying deploy/lightrag.env.example" >&2
+          exit 1
+        fi
+      - task k8s:apply
+      - task infra:wait
+
+  infra:wait:
+    desc: Wait for core deployments to become available
+    cmds:
+      - '{{.KUBECTL}} -n "{{.NAMESPACE}}" rollout status deployment/ollama --timeout=10m'
+      - '{{.KUBECTL}} -n "{{.NAMESPACE}}" rollout status deployment/lightrag --timeout=15m'
+      - '{{.KUBECTL}} -n "{{.NAMESPACE}}" rollout status deployment/open-webui --timeout=15m'
+
+  models:pull:
+    desc: Pull default Ollama models inside the cluster (edit k8s/ollama-pull-job.yaml to change models)
+    cmds:
+      - '{{.KUBECTL}} -n "{{.NAMESPACE}}" delete job ollama-pull-models --ignore-not-found=true'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/ollama-pull-job.yaml"'
+      - '{{.KUBECTL}} -n "{{.NAMESPACE}}" wait --for=condition=complete job/ollama-pull-models --timeout=60m'
+
+  port-forward:
+    desc: Port-forward Ollama, LightRAG, and Open WebUI to localhost (blocks)
+    cmds:
+      - |
+        set -euo pipefail
+        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/ollama 11434:11434 &
+        PF_OLLAMA_PID=$!
+        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/lightrag 9621:9621 &
+        PF_LIGHTRAG_PID=$!
+        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/open-webui 8080:8080 &
+        PF_WEBUI_PID=$!
+        cleanup() {
+          kill "$PF_OLLAMA_PID" "$PF_LIGHTRAG_PID" "$PF_WEBUI_PID" 2>/dev/null || true
+        }
+        trap cleanup INT TERM EXIT
+        wait
+
+  import:file:
+    desc: "Import a file into LightRAG (usage: task import:file FILE=./doc.txt)"
+    cmds:
+      - |
+        set -euo pipefail
+        if [ -z "${FILE:-}" ]; then
+          echo "FILE is required (example: task import:file FILE=./notes.txt)" >&2
+          exit 1
+        fi
+        LIGHTRAG_URL="${LIGHTRAG_URL:-http://127.0.0.1:9621}"
+        curl -fsS -X POST "${LIGHTRAG_URL}/documents/upload" -F "file=@${FILE}"
+
+  e2e:
+    desc: Run end-to-end checks (expects port-forwards or direct cluster access)
+    cmds:
+      - 'bash "{{.REPO_ROOT}}/scripts/e2e.sh"'
+
+  e2e:k8s:
+    desc: Port-forward in the background, run e2e, then stop port-forwards
+    cmds:
+      - |
+        set -euo pipefail
+        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/ollama 11434:11434 >/tmp/lightrag_stack_pf_ollama.log 2>&1 &
+        echo $! >/tmp/lightrag_stack_pf_ollama.pid
+        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/lightrag 9621:9621 >/tmp/lightrag_stack_pf_lightrag.log 2>&1 &
+        echo $! >/tmp/lightrag_stack_pf_lightrag.pid
+        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/open-webui 8080:8080 >/tmp/lightrag_stack_pf_webui.log 2>&1 &
+        echo $! >/tmp/lightrag_stack_pf_webui.pid
+        cleanup() {
+          for f in /tmp/lightrag_stack_pf_ollama.pid /tmp/lightrag_stack_pf_lightrag.pid /tmp/lightrag_stack_pf_webui.pid; do
+            if [ -f "$f" ]; then
+              kill "$(cat "$f")" 2>/dev/null || true
+              rm -f "$f"
+            fi
+          done
+        }
+        trap cleanup EXIT
+        sleep 2
+        bash "{{.REPO_ROOT}}/scripts/e2e.sh"
+        cleanup
+        trap - EXIT
+
+  infra:stop:
+    desc: Delete the stack namespace (destructive)
+    cmds:
+      - '{{.KUBECTL}} delete namespace "{{.NAMESPACE}}" --ignore-not-found=true'

@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ollama-pull-models
+  namespace: lightrag-stack
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: pull
+          image: ollama/ollama:latest
+          env:
+            - name: OLLAMA_HOST
+              value: "http://ollama.lightrag-stack.svc.cluster.local:11434"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              echo "Waiting for Ollama..."
+              i=0
+              while [ "$i" -lt 120 ]; do
+                if ollama list >/dev/null 2>&1; then
+                  echo "Ollama is up."
+                  break
+                fi
+                i=$((i + 1))
+                sleep 2
+              done
+              ollama pull "${PULL_LLM_MODEL}"
+              ollama pull "${PULL_EMBEDDING_MODEL}"
+              echo "Pull complete."
+          env:
+            - name: PULL_LLM_MODEL
+              value: "qwen2.5:0.5b"
+            - name: PULL_EMBEDDING_MODEL
+              value: "nomic-embed-text"
