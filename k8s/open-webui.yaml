@@ -48,7 +48,7 @@ spec:
               name: http
           env:
             - name: OLLAMA_BASE_URLS
-              value: "http://ollama.lightrag-stack.svc.cluster.local:11434;http://lightrag.lightrag-stack.svc.cluster.local:9621"
+              value: "http://host.lima.internal:11434;http://lightrag.lightrag-stack.svc.cluster.local:9621"
             - name: ENABLE_OLLAMA_API
               value: "true"
             - name: WEBUI_SECRET_KEY

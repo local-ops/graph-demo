@@ -47,7 +47,6 @@ tasks:
           echo "Created $TARGET from open-webui-secrets.example.yaml — set webui-secret-key and admin password before production use." >&2
         fi
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/namespace.yaml"'
-      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/ollama.yaml"'
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/generated/lightrag-env-secret.yaml"'
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/lightrag.yaml"'
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/open-webui-secrets.yaml"'
@@ -65,30 +64,25 @@ tasks:
   infra:wait:
     desc: Wait for core deployments to become available
     cmds:
-      - '{{.KUBECTL}} -n "{{.NAMESPACE}}" rollout status deployment/ollama --timeout=10m'
       - '{{.KUBECTL}} -n "{{.NAMESPACE}}" rollout status deployment/lightrag --timeout=15m'
       - '{{.KUBECTL}} -n "{{.NAMESPACE}}" rollout status deployment/open-webui --timeout=15m'
 
   models:pull:
-    desc: Pull default Ollama models inside the cluster (edit k8s/ollama-pull-job.yaml to change models)
+    desc: Pull Ollama models on the Mac host (native Metal) using LLM_MODEL and EMBEDDING_MODEL from deploy/lightrag.env
     cmds:
-      - '{{.KUBECTL}} -n "{{.NAMESPACE}}" delete job ollama-pull-models --ignore-not-found=true'
-      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/ollama-pull-job.yaml"'
-      - '{{.KUBECTL}} -n "{{.NAMESPACE}}" wait --for=condition=complete job/ollama-pull-models --timeout=60m'
+      - 'bash "{{.REPO_ROOT}}/scripts/host-ollama-pull.sh" "{{.REPO_ROOT}}/deploy/lightrag.env"'
 
   port-forward:
-    desc: Port-forward Ollama, LightRAG, and Open WebUI to localhost (blocks)
+    desc: Port-forward LightRAG and Open WebUI to localhost (Ollama stays on the host)
     cmds:
       - |
         set -euo pipefail
-        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/ollama 11434:11434 &
-        PF_OLLAMA_PID=$!
         {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/lightrag 9621:9621 &
         PF_LIGHTRAG_PID=$!
         {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/open-webui 8080:8080 &
         PF_WEBUI_PID=$!
         cleanup() {
-          kill "$PF_OLLAMA_PID" "$PF_LIGHTRAG_PID" "$PF_WEBUI_PID" 2>/dev/null || true
+          kill "$PF_LIGHTRAG_PID" "$PF_WEBUI_PID" 2>/dev/null || true
         }
         trap cleanup INT TERM EXIT
         wait
@@ -115,14 +109,12 @@ tasks:
     cmds:
       - |
         set -euo pipefail
-        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/ollama 11434:11434 >/tmp/lightrag_stack_pf_ollama.log 2>&1 &
-        echo $! >/tmp/lightrag_stack_pf_ollama.pid
         {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/lightrag 9621:9621 >/tmp/lightrag_stack_pf_lightrag.log 2>&1 &
         echo $! >/tmp/lightrag_stack_pf_lightrag.pid
         {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/open-webui 8080:8080 >/tmp/lightrag_stack_pf_webui.log 2>&1 &
         echo $! >/tmp/lightrag_stack_pf_webui.pid
         cleanup() {
-          for f in /tmp/lightrag_stack_pf_ollama.pid /tmp/lightrag_stack_pf_lightrag.pid /tmp/lightrag_stack_pf_webui.pid; do
+          for f in /tmp/lightrag_stack_pf_lightrag.pid /tmp/lightrag_stack_pf_webui.pid; do
             if [ -f "$f" ]; then
               kill "$(cat "$f")" 2>/dev/null || true
               rm -f "$f"
