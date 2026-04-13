@@ -10,7 +10,7 @@ This repository ships a small Kubernetes manifest set plus a Taskfile workflow f
 
 ## One-time configuration
 
-1. Copy `deploy/lightrag.env.example` to `deploy/lightrag.env` and adjust models if needed.
+1. Run `task secrets:sync` once: if `deploy/lightrag.env` is missing, it is created from `deploy/lightrag.env.example`. Edit that file to match your models and cluster before production use.
 2. Copy `k8s/open-webui-secrets.example.yaml` to `k8s/open-webui-secrets.yaml` and set strong values for:
    - `webui-secret-key`
    - `webui-admin-email`

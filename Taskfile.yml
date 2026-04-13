@@ -20,8 +20,16 @@ tasks:
       - task --list
 
   secrets:sync:
-    desc: Render Kubernetes Secret `lightrag-env` from deploy/lightrag.env
+    desc: Render Kubernetes Secret `lightrag-env` from deploy/lightrag.env (creates deploy/lightrag.env from example if missing)
     cmds:
+      - |
+        set -euo pipefail
+        EXAMPLE="{{.REPO_ROOT}}/deploy/lightrag.env.example"
+        TARGET="{{.REPO_ROOT}}/deploy/lightrag.env"
+        if [ ! -f "$TARGET" ]; then
+          cp "$EXAMPLE" "$TARGET"
+          echo "Created $TARGET from deploy/lightrag.env.example — edit values before production use." >&2
+        fi
       - 'bash "{{.REPO_ROOT}}/scripts/render-lightrag-secret.sh" "{{.REPO_ROOT}}/deploy/lightrag.env" "{{.REPO_ROOT}}/k8s/generated/lightrag-env-secret.yaml"'
     requires:
       vars: [REPO_ROOT]
@@ -40,15 +48,9 @@ tasks:
       vars: [REPO_ROOT]
 
   infra:start:
-    desc: Sync secrets (if present) and apply the full stack
+    desc: Sync secrets and apply the full stack
     cmds:
-      - |
-        if [ -f "{{.REPO_ROOT}}/deploy/lightrag.env" ]; then
-          task secrets:sync
-        else
-          echo "deploy/lightrag.env not found; run secrets:sync manually after copying deploy/lightrag.env.example" >&2
-          exit 1
-        fi
+      - task secrets:sync
       - task k8s:apply
       - task infra:wait
 
