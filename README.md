@@ -21,7 +21,8 @@ Kubernetes manifests plus a Taskfile workflow for **Colima Kubernetes** (profile
    task secrets:sync
    ```
 
-   Legt bei Bedarf `deploy/lightrag.env` und `k8s/open-webui-secrets.yaml` aus den Beispielen an. **Admin-Passwort und `webui-secret-key` in `k8s/open-webui-secrets.yaml` setzen.**
+   **`task secrets:sync` legt `deploy/lightrag.env` immer neu aus `deploy/lightrag.env.example` an.** Eine vorhandene Datei wird nach `deploy/.archived/lightrag.env.<Zeitstempel>` verschoben (Verzeichnis ist gitignored). Anschließend wird das Kubernetes-Secret gerendert.  
+   `k8s/open-webui-secrets.yaml` wird weiterhin nur beim ersten `task k8s:apply` aus dem Example angelegt, falls sie fehlt — **Admin-Passwort und `webui-secret-key` dort setzen.**
 
 4. **Modelle auf dem Host ziehen** (Metal, liest `LLM_MODEL` / `EMBEDDING_MODEL` aus `deploy/lightrag.env`):
 
@@ -46,6 +47,8 @@ Kubernetes manifests plus a Taskfile workflow for **Colima Kubernetes** (profile
 **Hinweis Hostname:** Pods nutzen standardmäßig `http://host.lima.internal:11434` (Colima/Lima → macOS-Host). Falls Verbindungsfehler auftreten, in `deploy/lightrag.env` sowie in `k8s/open-webui.yaml` (`OLLAMA_BASE_URLS`) auf die in der [Colima-FAQ](https://github.com/abiosoft/colima/blob/main/docs/FAQ.md) genannte Adresse wechseln (häufig `http://host.docker.internal:11434`) und erneut `task secrets:sync` sowie `task k8s:apply` ausführen.
 
 **Upgrade von einer älteren Version** mit in-Cluster-Ollama: optional `kubectl --context=colima-k3s -n lightrag-stack delete deployment ollama pvc ollama-data --ignore-not-found=true`, damit keine alten Ressourcen herumliegen.
+
+**Hinweis:** Jeder Lauf von `task secrets:sync` ersetzt `deploy/lightrag.env` durch die Vorlage; eigene Anpassungen vorher sichern oder aus `deploy/.archived/` zurückholen.
 
 ---
 
@@ -74,7 +77,7 @@ task infra:start CONTEXT=your-context-name
 
 ## Einmalige Konfiguration
 
-1. `task secrets:sync` — erzeugt bei Bedarf `deploy/lightrag.env` aus `deploy/lightrag.env.example` und rendert `k8s/generated/lightrag-env-secret.yaml`.
+1. `task secrets:sync` — archiviert eine bestehende `deploy/lightrag.env`, kopiert dann immer frisch aus `deploy/lightrag.env.example`, rendert `k8s/generated/lightrag-env-secret.yaml`.
 2. `k8s/open-webui-secrets.yaml` — wird bei erstem `task k8s:apply` aus dem Example kopiert; starke Werte für `webui-secret-key`, `webui-admin-email`, `webui-admin-password` setzen.
 
 `k8s/open-webui-secrets.yaml` und `deploy/lightrag.env` sind gitignored.
