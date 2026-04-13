@@ -38,11 +38,18 @@ tasks:
   k8s:apply:
     desc: Apply namespace + workloads (expects k8s/generated/lightrag-env-secret.yaml)
     cmds:
+      - |
+        set -euo pipefail
+        EXAMPLE="{{.REPO_ROOT}}/k8s/open-webui-secrets.example.yaml"
+        TARGET="{{.REPO_ROOT}}/k8s/open-webui-secrets.yaml"
+        if [ ! -f "$TARGET" ]; then
+          cp "$EXAMPLE" "$TARGET"
+          echo "Created $TARGET from open-webui-secrets.example.yaml — set webui-secret-key and admin password before production use." >&2
+        fi
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/namespace.yaml"'
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/ollama.yaml"'
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/generated/lightrag-env-secret.yaml"'
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/lightrag.yaml"'
-      - 'test -f "{{.REPO_ROOT}}/k8s/open-webui-secrets.yaml"'
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/open-webui-secrets.yaml"'
       - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/open-webui.yaml"'
     requires:

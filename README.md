@@ -19,7 +19,7 @@ task infra:start CONTEXT=your-context-name
 ## One-time configuration
 
 1. Run `task secrets:sync` once: if `deploy/lightrag.env` is missing, it is created from `deploy/lightrag.env.example`. Edit that file to match your models and cluster before production use.
-2. Copy `k8s/open-webui-secrets.example.yaml` to `k8s/open-webui-secrets.yaml` and set strong values for:
+2. On first `task k8s:apply` / `task infra:start`, if `k8s/open-webui-secrets.yaml` is missing it is created from `k8s/open-webui-secrets.example.yaml`. Replace placeholders with strong values for:
    - `webui-secret-key`
    - `webui-admin-email`
    - `webui-admin-password`
