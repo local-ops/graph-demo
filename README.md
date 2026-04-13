@@ -2,9 +2,17 @@
 
 This repository ships a small Kubernetes manifest set plus a Taskfile workflow for Colima Kubernetes (or any kube context with default `StorageClass`).
 
+## Colima profile `k3s`
+
+The Taskfile defaults `CONTEXT` to `colima-k3s` (the usual `kubectl` context name for `colima start -p k3s --kubernetes`). Use another cluster with:
+
+```bash
+task infra:start CONTEXT=your-context-name
+```
+
 ## Prerequisites
 
-- `kubectl` configured for your cluster (`colima kubectl` context is fine)
+- `kubectl` configured for your cluster (`kubectl config get-contexts` should list your Colima context)
 - `task` ([Taskfile](https://taskfile.dev/))
 - Enough disk for model weights (PVCs are defined in `k8s/`)
 
@@ -25,7 +33,9 @@ task infra:start
 task models:pull
 ```
 
-`task models:pull` runs a one-off Job that downloads the models configured in `k8s/ollama-pull-job.yaml` (defaults are sized for CPU-only setups).
+`task models:pull` runs a one-off Job that downloads the models configured in `k8s/ollama-pull-job.yaml`. Defaults follow common guidance for **Apple M4 + ~16 GB unified memory** (≈7–8B chat + `nomic-embed-text`); change `PULL_*` in that Job and `LLM_MODEL` / `EMBEDDING_*` in `deploy/lightrag.env` if you have more RAM or want a different stack.
+
+If you already created `deploy/lightrag.env` from an older template, copy fresh defaults from `deploy/lightrag.env.example` or delete `deploy/lightrag.env` and run `task secrets:sync` again to regenerate it from the example.
 
 ## Day-to-day usage
 

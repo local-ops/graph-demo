@@ -35,6 +35,6 @@ spec:
               echo "Pull complete."
           env:
             - name: PULL_LLM_MODEL
-              value: "qwen2.5:0.5b"
+              value: "llama3.1:8b"
             - name: PULL_EMBEDDING_MODEL
               value: "nomic-embed-text"

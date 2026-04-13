@@ -2,7 +2,8 @@ version: "3"
 
 vars:
   NAMESPACE: lightrag-stack
-  CONTEXT: ""
+  # Colima profile `-p k3s` → kubectl context is usually `colima-k3s` (override with `task ... CONTEXT=other`).
+  CONTEXT: colima-k3s
   REPO_ROOT:
     sh: git rev-parse --show-toplevel
   KUBECTL:
