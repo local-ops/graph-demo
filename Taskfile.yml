@@ -80,17 +80,7 @@ tasks:
   port-forward:
     desc: Port-forward LightRAG and Open WebUI to localhost (Ollama stays on the host)
     cmds:
-      - |
-        set -euo pipefail
-        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/lightrag 9621:9621 &
-        PF_LIGHTRAG_PID=$!
-        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/open-webui 8080:8080 &
-        PF_WEBUI_PID=$!
-        cleanup() {
-          kill "$PF_LIGHTRAG_PID" "$PF_WEBUI_PID" 2>/dev/null || true
-        }
-        trap cleanup INT TERM EXIT
-        wait
+      - 'bash "{{.REPO_ROOT}}/scripts/port-forward.sh" "{{.CONTEXT}}" "{{.NAMESPACE}}"'
 
   import:file:
     desc: "Import a file into LightRAG (usage: task import:file FILE=./doc.txt)"
@@ -112,25 +102,7 @@ tasks:
   e2e:k8s:
     desc: Port-forward in the background, run e2e, then stop port-forwards
     cmds:
-      - |
-        set -euo pipefail
-        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/lightrag 9621:9621 >/tmp/lightrag_stack_pf_lightrag.log 2>&1 &
-        echo $! >/tmp/lightrag_stack_pf_lightrag.pid
-        {{.KUBECTL}} -n "{{.NAMESPACE}}" port-forward svc/open-webui 8080:8080 >/tmp/lightrag_stack_pf_webui.log 2>&1 &
-        echo $! >/tmp/lightrag_stack_pf_webui.pid
-        cleanup() {
-          for f in /tmp/lightrag_stack_pf_lightrag.pid /tmp/lightrag_stack_pf_webui.pid; do
-            if [ -f "$f" ]; then
-              kill "$(cat "$f")" 2>/dev/null || true
-              rm -f "$f"
-            fi
-          done
-        }
-        trap cleanup EXIT
-        sleep 2
-        bash "{{.REPO_ROOT}}/scripts/e2e.sh"
-        cleanup
-        trap - EXIT
+      - 'bash "{{.REPO_ROOT}}/scripts/e2e-k8s.sh" "{{.CONTEXT}}" "{{.NAMESPACE}}"'
 
   infra:stop:
     desc: Delete the stack namespace (destructive)
