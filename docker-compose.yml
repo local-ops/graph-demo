@@ -1,0 +1,55 @@
+services:
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    restart: unless-stopped
+    ports:
+      - "9621:9621"
+    env_file:
+      - ./deploy/lightrag.env
+    volumes:
+      - lightrag-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9621/health').getcode()==200 else 1)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:latest
+    restart: unless-stopped
+    depends_on:
+      lightrag:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./deploy/open-webui.env
+    environment:
+      ENABLE_OLLAMA_API: "true"
+      OLLAMA_BASE_URLS: "http://host.docker.internal:11434;http://lightrag:9621"
+      WEBUI_ADMIN_NAME: "Admin"
+    volumes:
+      - open-webui-data:/app/backend/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; code=urllib.request.urlopen('http://127.0.0.1:8080/').getcode(); sys.exit(0 if code in (200,302,307) else 1)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  lightrag-data:
+  open-webui-data:

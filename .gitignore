@@ -1,4 +1,5 @@
 deploy/lightrag.env
+deploy/open-webui.env
 deploy/.archived/
 k8s/open-webui-secrets.yaml
 k8s/generated/

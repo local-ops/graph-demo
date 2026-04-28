@@ -43,11 +43,8 @@ wait_http() {
 }
 
 json_get_track_id() {
-  python3 - <<'PY'
-import json, sys
-data = json.load(sys.stdin)
-print(data.get("track_id") or "")
-PY
+  local payload="$1"
+  python3 -c 'import json,sys; print((json.loads(sys.argv[1]).get("track_id") or ""))' "$payload"
 }
 
 wait_track_processed() {
@@ -58,30 +55,24 @@ wait_track_processed() {
   while ((SECONDS < deadline)); do
     local body
     body="$(curl -fsS "$base/documents/track_status/$track_id")"
-    if echo "$body" | python3 - <<'PY'
+    if python3 -c '
 import json, sys
-
-payload = json.load(sys.stdin)
+payload = json.loads(sys.argv[1])
 docs = payload.get("documents") or []
 if not docs:
     raise SystemExit(1)
-
 statuses = {str(d.get("status", "")).upper() for d in docs}
 if "FAILED" in statuses:
-    print("FAILED")
     raise SystemExit(2)
-
 if statuses and statuses <= {"PROCESSED"}:
     raise SystemExit(0)
-
 raise SystemExit(1)
-PY
-    then
+' "$body"; then
       log "Track $track_id finished successfully"
       return 0
     fi
 
-    local rc="${PIPESTATUS[1]}"
+    local rc="$?"
     if [[ "$rc" == "2" ]]; then
       echo "Document processing failed for track_id=$track_id" >&2
       echo "$body" >&2
@@ -123,7 +114,7 @@ main() {
   )"
 
   local track_id
-  track_id="$(printf "%s" "$upload_json" | json_get_track_id)"
+  track_id="$(json_get_track_id "$upload_json")"
   if [[ -z "$track_id" ]]; then
     echo "Upload response missing track_id: $upload_json" >&2
     exit 1
@@ -140,15 +131,13 @@ main() {
       -d '{"query":"What city is mentioned in the E2E fixture?","mode":"naive"}'
   )"
 
-  if ! printf "%s" "$query_json" | python3 - <<'PY'
+  if ! python3 -c '
 import json, sys
-
-payload = json.load(sys.stdin)
+payload = json.loads(sys.argv[1])
 text = (payload.get("response") or "").lower()
 if "springfield" not in text:
     raise SystemExit("Expected codeword city not found in response")
-PY
-  then
+' "$query_json"; then
     echo "Unexpected /query response: $query_json" >&2
     exit 1
   fi

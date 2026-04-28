@@ -36,10 +36,21 @@ Use these commands as defaults unless the user asks otherwise:
 
 - Start/update stack: `task infra:start`
 - Pull host models: `task models:pull`
-- Port-forward services: `task port-forward`
+- Show local service URLs: `task infra:urls`
 - Import document: `task import:file FILE=./path/to/file.txt`
-- E2E checks (existing forwards): `task e2e`
-- E2E checks (k8s with temporary forwards): `task e2e:k8s`
+- E2E checks (Compose default): `task e2e`
+- E2E checks (compose bootstrap): `task e2e:compose`
+- Legacy Kubernetes E2E: `task e2e:k8s`
+
+## Current Runtime Baseline (Confirmed)
+
+- Default runtime is Docker Compose, not k3s/Kubernetes.
+- Ollama runs natively on the macOS host to use Metal acceleration.
+- Containers must access host Ollama via `http://host.docker.internal:11434`.
+- Host Ollama must be reachable beyond loopback; on macOS app installs use:
+  - `launchctl setenv OLLAMA_HOST "0.0.0.0:11434"`
+  - restart the Ollama app afterward.
+- Validate host connectivity from containers explicitly when touching runtime wiring.
 
 ## Change Guardrails
 
@@ -58,6 +69,8 @@ Minimum expectation:
 2. Verify LightRAG health and query path.
 3. Verify document upload/indexing flow.
 4. Run `task e2e` or `task e2e:k8s` and capture outcomes.
+5. For Compose/networking changes, verify container -> host Ollama path, e.g.:
+   - `docker compose exec open-webui sh -lc 'wget -qO- http://host.docker.internal:11434/api/tags >/dev/null && echo ok'`
 
 If verification cannot run, explain exactly why and provide the next executable command for the user.
 

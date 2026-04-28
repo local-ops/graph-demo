@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Background port-forwards, run e2e, cleanup (bash only — safe when Task uses zsh).
+# Legacy Kubernetes flow: background port-forwards, run e2e, cleanup.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

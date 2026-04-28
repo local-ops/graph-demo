@@ -11,6 +11,7 @@ fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing $ENV_FILE (copy from deploy/lightrag.env.example or run: task secrets:sync)" >&2
+  echo "Tip: task secrets:sync also creates deploy/open-webui.env for Compose." >&2
   exit 1
 fi
 

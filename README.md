@@ -1,131 +1,108 @@
-# LightRAG + Ollama + Open WebUI (Kubernetes)
+# LightRAG + Ollama + Open WebUI (Docker Compose)
 
-Kubernetes manifests plus a Taskfile workflow for **Colima Kubernetes** (profile `k3s`). **Ollama läuft nativ auf macOS** (Metal); im Cluster laufen nur **LightRAG** und **Open WebUI**, die den Host-Ollama über `host.lima.internal:11434` erreichen.
+This project runs **LightRAG** and **Open WebUI** with Docker Compose.
+**Ollama runs natively on macOS** to use Apple Metal performance, and containers call it via `host.docker.internal`.
 
-## Quickstart (macOS, Colima Profil `k3s`)
+## Quickstart (macOS + Docker Desktop)
 
-1. **Colima mit Kubernetes starten** (falls noch nicht geschehen):
+1. **Install prerequisites**
+   - Docker Desktop
+   - [Task](https://taskfile.dev/)
+   - Ollama: https://ollama.com/download
+
+2. **Allow container access to host Ollama**
+
+   Ollama listens on `127.0.0.1` by default. For container access, expose it on all interfaces:
 
    ```bash
-   colima start -p k3s --kubernetes
+   launchctl setenv OLLAMA_HOST "0.0.0.0:11434"
    ```
 
-2. **Ollama auf dem Mac installieren und starten** (Host-Dienst, Port 11434):
+   Then restart the Ollama app.
 
-   - Download: https://ollama.com/download  
-   - Prüfen: `curl -sS http://127.0.0.1:11434/api/tags`
-
-3. **Repository vorbereiten**:
+3. **Generate runtime env files**
 
    ```bash
    task secrets:sync
    ```
 
-   **`task secrets:sync` legt `deploy/lightrag.env` immer neu aus `deploy/lightrag.env.example` an.** Eine vorhandene Datei wird nach `deploy/.archived/lightrag.env.<Zeitstempel>` verschoben (Verzeichnis ist gitignored). Anschließend wird das Kubernetes-Secret gerendert.  
-   `k8s/open-webui-secrets.yaml` wird weiterhin nur beim ersten `task k8s:apply` aus dem Example angelegt, falls sie fehlt — **Admin-Passwort und `webui-secret-key` dort setzen.**
+   This writes:
+   - `deploy/lightrag.env` from `deploy/lightrag.env.example`
+   - `deploy/open-webui.env` from `deploy/open-webui.env.example`
 
-4. **Modelle auf dem Host ziehen** (Metal, liest `LLM_MODEL` / `EMBEDDING_MODEL` aus `deploy/lightrag.env`):
+   Existing files are archived into `deploy/.archived/`.
+
+4. **Adjust credentials and models**
+   - Edit `deploy/open-webui.env` (`WEBUI_SECRET_KEY`, admin credentials)
+   - Edit `deploy/lightrag.env` if you want different model names
+
+5. **Pull models on the host (Metal)**
 
    ```bash
    task models:pull
    ```
 
-5. **Stack im Cluster ausrollen und warten**:
+6. **Start stack and wait for readiness**
 
    ```bash
    task infra:start
    ```
 
-6. **Port-Forward** (LightRAG + WebUI; Ollama bleibt auf `localhost:11434`):
+7. **Open services**
+   - Open WebUI: http://127.0.0.1:8080
+   - LightRAG API: http://127.0.0.1:9621
+   - Host Ollama API: http://127.0.0.1:11434
 
-   ```bash
-   task port-forward
-   ```
+## Architecture
 
-7. **Browser**: Open WebUI unter http://127.0.0.1:8080 (Login wie in `k8s/open-webui-secrets.yaml`). LightRAG-API: http://127.0.0.1:9621
+- Ollama runs on the macOS host (`11434`)
+- `lightrag` container calls host Ollama via:
+  - `LLM_BINDING_HOST=http://host.docker.internal:11434`
+  - `EMBEDDING_BINDING_HOST=http://host.docker.internal:11434`
+- `open-webui` container uses:
+  - host Ollama: `http://host.docker.internal:11434`
+  - LightRAG endpoint on Compose network: `http://lightrag:9621`
 
-**Hinweis Hostname:** Pods nutzen standardmäßig `http://host.lima.internal:11434` (Colima/Lima → macOS-Host). Falls Verbindungsfehler auftreten, in `deploy/lightrag.env` sowie in `k8s/open-webui.yaml` (`OLLAMA_BASE_URLS`) auf die in der [Colima-FAQ](https://github.com/abiosoft/colima/blob/main/docs/FAQ.md) genannte Adresse wechseln (häufig `http://host.docker.internal:11434`) und erneut `task secrets:sync` sowie `task k8s:apply` ausführen.
-
-**Upgrade von einer älteren Version** mit in-Cluster-Ollama: optional `kubectl --context=colima-k3s -n lightrag-stack delete deployment ollama pvc ollama-data --ignore-not-found=true`, damit keine alten Ressourcen herumliegen.
-
-**Hinweis:** Jeder Lauf von `task secrets:sync` ersetzt `deploy/lightrag.env` durch die Vorlage; eigene Anpassungen vorher sichern oder aus `deploy/.archived/` zurückholen.
-
----
-
-## Architektur (kurz)
-
-| Komponente | Wo? | Zweck |
-|------------|-----|--------|
-| Ollama | macOS Host | LLM + Embeddings (Metal) |
-| LightRAG | Pod im Cluster | RAG-API, spricht Ollama über `host.lima.internal` |
-| Open WebUI | Pod im Cluster | UI; Ollama-URLs: Host-Ollama + LightRAG-Ollama-Emulation |
-
-## Colima Profil `k3s`
-
-Im `Taskfile` ist `CONTEXT` standardmäßig `colima-k3s`. Anderer Cluster:
+## Daily workflow
 
 ```bash
-task infra:start CONTEXT=your-context-name
-```
-
-## Voraussetzungen
-
-- `kubectl` mit passendem Kontext
-- `task` ([Taskfile](https://taskfile.dev/))
-- **Ollama** als Host-Dienst auf dem Mac
-- Default **StorageClass** für PVCs (LightRAG + Open WebUI)
-
-## Einmalige Konfiguration
-
-1. `task secrets:sync` — archiviert eine bestehende `deploy/lightrag.env`, kopiert dann immer frisch aus `deploy/lightrag.env.example`, rendert `k8s/generated/lightrag-env-secret.yaml`.
-2. `k8s/open-webui-secrets.yaml` — wird bei erstem `task k8s:apply` aus dem Example kopiert; starke Werte für `webui-secret-key`, `webui-admin-email`, `webui-admin-password` setzen.
-
-`k8s/open-webui-secrets.yaml` und `deploy/lightrag.env` sind gitignored.
-
-## Deploy (nach Quickstart)
-
-```bash
-task models:pull
 task infra:start
+task infra:urls
+FILE="../../../Downloads/BGB.pdf" task import:file
+task e2e
 ```
 
-Modelle werden **nur noch auf dem Host** gezogen (`scripts/host-ollama-pull.sh`), nicht im Cluster.
-
-## Alltag
+## Verification commands
 
 ```bash
-task port-forward
+docker compose ps
+curl -fsS http://127.0.0.1:9621/health
+curl -I http://127.0.0.1:8080/
+task e2e
 ```
 
-- Open WebUI: http://127.0.0.1:8080  
-- LightRAG: http://127.0.0.1:9621 (Ollama-kompatible Endpunkte für `lightrag:latest` laut LightRAG-Doku)
-
-## Dokumente importieren
-
-Mit laufendem Port-Forward:
+To verify host Ollama connectivity from inside a container:
 
 ```bash
-task import:file FILE=./path/to/document.txt
+docker compose exec open-webui sh -lc 'wget -qO- http://host.docker.internal:11434/api/tags >/dev/null && echo ok'
 ```
 
-## End-to-end Tests
-
-```bash
-task e2e:k8s
-```
-
-Erwartet **Host-Ollama** auf `http://127.0.0.1:11434`, port-forwarded LightRAG und WebUI. Upload von `e2e/fixtures/sample.txt`, Warten auf Indexierung, Smoke-Check per `POST /query`.
-
-## Optional: anderer kube-Kontext
-
-```bash
-task infra:start CONTEXT=my-context
-```
-
-## Namespace löschen
+## Stop stack
 
 ```bash
 task infra:stop
 ```
 
-Löscht nur den Kubernetes-Namespace; **Ollama auf dem Host** und lokale Modelle unter `~/.ollama` bleiben unberührt.
+To also remove data volumes:
+
+```bash
+task infra:stop:volumes
+```
+
+## Legacy Kubernetes workflows
+
+Kubernetes manifests are still available under `k8s/`.
+Legacy tasks:
+- `task legacy:k8s:secrets:sync`
+- `task legacy:k8s:apply`
+- `task e2e:k8s`
