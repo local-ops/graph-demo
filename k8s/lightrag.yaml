@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lightrag-data
+  namespace: lightrag-stack
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lightrag
+  namespace: lightrag-stack
+spec:
+  selector:
+    app: lightrag
+  ports:
+    - name: http
+      port: 9621
+      targetPort: 9621
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lightrag
+  namespace: lightrag-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lightrag
+  template:
+    metadata:
+      labels:
+        app: lightrag
+    spec:
+      initContainers:
+        - name: ensure-dirs
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /app/data/rag_storage /app/data/inputs
+              chmod 0777 /app/data/rag_storage /app/data/inputs
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      containers:
+        - name: lightrag
+          image: ghcr.io/hkuds/lightrag:latest
+          ports:
+            - containerPort: 9621
+              name: http
+          envFrom:
+            - secretRef:
+                name: lightrag-env
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: lightrag-data

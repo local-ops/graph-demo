@@ -1,0 +1,163 @@
+version: "3"
+
+vars:
+  NAMESPACE: lightrag-stack
+  CONTEXT: colima-k3s
+  REPO_ROOT:
+    sh: git rev-parse --show-toplevel
+  KUBECTL:
+    sh: |
+      if [ -n "{{.CONTEXT}}" ]; then
+        echo "kubectl --context={{.CONTEXT}}"
+      else
+        echo "kubectl"
+      fi
+  COMPOSE:
+    sh: |
+      if command -v docker-compose >/dev/null 2>&1; then
+        echo "docker-compose"
+      else
+        echo "docker compose"
+      fi
+
+tasks:
+  default:
+    desc: List Taskfile tasks
+    cmds:
+      - task --list
+
+  secrets:sync:
+    desc: Archive existing deploy env files and copy fresh examples for Compose
+    cmds:
+      - |
+        set -euo pipefail
+        ARCHIVE_DIR="{{.REPO_ROOT}}/deploy/.archived"
+        mkdir -p "$ARCHIVE_DIR"
+
+        sync_env() {
+          local name="$1"
+          local example="{{.REPO_ROOT}}/deploy/${name}.example"
+          local target="{{.REPO_ROOT}}/deploy/${name}"
+          if [ -f "$target" ]; then
+            stamp="$(date +%Y%m%d-%H%M%S)"
+            mv "$target" "$ARCHIVE_DIR/${name}.${stamp}"
+            echo "Archived previous deploy/${name} to deploy/.archived/${name}.${stamp}" >&2
+          fi
+          cp "$example" "$target"
+          echo "Wrote $target from deploy/${name}.example — edit before running in production." >&2
+        }
+
+        sync_env "lightrag.env"
+        sync_env "open-webui.env"
+    requires:
+      vars: [REPO_ROOT]
+
+  infra:start:
+    desc: Sync env files, start Compose stack, and wait until services are reachable
+    cmds:
+      - task secrets:sync
+      - '{{.COMPOSE}} -f "{{.REPO_ROOT}}/docker-compose.yml" up -d'
+      - task infra:wait
+
+  infra:wait:
+    desc: Wait for LightRAG and Open WebUI HTTP endpoints
+    cmds:
+      - |
+        set -euo pipefail
+        wait_http() {
+          local name="$1"
+          local url="$2"
+          local deadline=$((SECONDS + 300))
+          while ((SECONDS < deadline)); do
+            code="$(curl -sS -o /dev/null -w "%{http_code}" "$url" || true)"
+            if [ "$code" = "200" ] || [ "$code" = "302" ] || [ "$code" = "307" ]; then
+              echo "$name is reachable: $url"
+              return 0
+            fi
+            sleep 2
+          done
+          echo "Timeout waiting for $name ($url)" >&2
+          exit 1
+        }
+        wait_http "LightRAG" "http://127.0.0.1:9621/health"
+        wait_http "Open WebUI" "http://127.0.0.1:8080/"
+
+  infra:urls:
+    desc: Print service URLs for the Compose runtime
+    cmds:
+      - 'echo "Open WebUI: http://127.0.0.1:8080"'
+      - 'echo "LightRAG:  http://127.0.0.1:9621"'
+      - 'echo "Ollama:    http://127.0.0.1:11434 (host)"'
+
+  models:pull:
+    desc: Pull Ollama models on the Mac host (native Metal) using deploy/lightrag.env
+    cmds:
+      - 'bash "{{.REPO_ROOT}}/scripts/host-ollama-pull.sh" "{{.REPO_ROOT}}/deploy/lightrag.env"'
+
+  port-forward:
+    desc: No-op for Compose runtime; services are already exposed on localhost
+    cmds:
+      - task infra:urls
+
+  import:file:
+    desc: "Import a file into LightRAG (usage: task import:file FILE=./doc.txt)"
+    cmds:
+      - |
+        set -euo pipefail
+        if [ -z "${FILE:-}" ]; then
+          echo "FILE is required (example: task import:file FILE=./notes.txt)" >&2
+          exit 1
+        fi
+        LIGHTRAG_URL="${LIGHTRAG_URL:-http://127.0.0.1:9621}"
+        curl -fsS -X POST "${LIGHTRAG_URL}/documents/upload" -F "file=@${FILE}"
+
+  e2e:
+    desc: Run end-to-end checks for the Compose stack
+    cmds:
+      - 'bash "{{.REPO_ROOT}}/scripts/e2e.sh"'
+
+  e2e:compose:
+    desc: Start compose stack (if needed), run e2e, then keep stack running
+    cmds:
+      - 'bash "{{.REPO_ROOT}}/scripts/e2e-compose.sh"'
+
+  e2e:k8s:
+    desc: Legacy Kubernetes e2e workflow with temporary port-forwards
+    cmds:
+      - 'bash "{{.REPO_ROOT}}/scripts/e2e-k8s.sh" "{{.CONTEXT}}" "{{.NAMESPACE}}"'
+
+  infra:stop:
+    desc: Stop the Compose stack (keeps volumes)
+    cmds:
+      - '{{.COMPOSE}} -f "{{.REPO_ROOT}}/docker-compose.yml" down'
+
+  infra:stop:volumes:
+    desc: Stop the Compose stack and remove volumes (destructive)
+    cmds:
+      - '{{.COMPOSE}} -f "{{.REPO_ROOT}}/docker-compose.yml" down -v'
+
+  legacy:k8s:secrets:sync:
+    desc: Legacy helper to render k8s/generated/lightrag-env-secret.yaml from deploy/lightrag.env
+    cmds:
+      - 'bash "{{.REPO_ROOT}}/scripts/render-lightrag-secret.sh" "{{.REPO_ROOT}}/deploy/lightrag.env" "{{.REPO_ROOT}}/k8s/generated/lightrag-env-secret.yaml"'
+    requires:
+      vars: [REPO_ROOT]
+
+  legacy:k8s:apply:
+    desc: Legacy Kubernetes apply workflow
+    cmds:
+      - |
+        set -euo pipefail
+        EXAMPLE="{{.REPO_ROOT}}/k8s/open-webui-secrets.example.yaml"
+        TARGET="{{.REPO_ROOT}}/k8s/open-webui-secrets.yaml"
+        if [ ! -f "$TARGET" ]; then
+          cp "$EXAMPLE" "$TARGET"
+          echo "Created $TARGET from open-webui-secrets.example.yaml — set secrets before use." >&2
+        fi
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/namespace.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/generated/lightrag-env-secret.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/lightrag.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/open-webui-secrets.yaml"'
+      - '{{.KUBECTL}} apply -f "{{.REPO_ROOT}}/k8s/open-webui.yaml"'
+    requires:
+      vars: [REPO_ROOT]
